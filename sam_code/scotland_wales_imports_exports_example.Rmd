@@ -1,0 +1,582 @@
+---
+title: "SARS-CoV-2 Imports and Exports"
+subtitle: "Scotland and Wales"
+author: "Samantha Lycett"
+date: "31/05/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+#library(kableExtra)
+library(tibble)
+knitr::opts_chunk$set(echo=FALSE, warning=FALSE, message=FALSE)
+knitr::opts_chunk$set(fig.path = "scotland_wales_imports_exports_example_images/")
+knitr::opts_chunk$set(fig.width=12, fig.height=6)
+library(ape)
+```
+
+```{r, include=FALSE, echo=FALSE}
+# load some custom functions
+#Rpath <- "~/Documents//GitLab//RiseFall-Scottish-COVID19//coronavirus_2020_r//"
+Rpath <- ""
+source(paste(Rpath,"getEl.R",sep=""))
+source(paste(Rpath,"calcDecimalDate.R",sep=""))
+source(paste(Rpath,"get_BEAST_cols.R",sep=""))
+source(paste(Rpath,"get_udates.R",sep=""))
+source(paste(Rpath,"birdSpecies_and_continents.R",sep=""))
+```
+
+```{r, include=FALSE, echo=FALSE}
+## THIS CAN BE CHANGED - dataDate is the date of the dataset, and is in the path and file names
+dataDate <- "2020-05-22"
+```
+
+```{r, include=FALSE, echo=FALSE}
+# set up paths
+# data is from the public microreact site
+rootPath <- "~/Documents//data//Coronavirus_2020//Microreact//"
+n2       <- "_microreact-project-cogconsortium-"
+ext      <-"data.csv"
+metaPath <- paste(rootPath,dataDate,"//",sep="")
+metaName <- paste(dataDate,n2,ext,sep="")
+treeName <- paste(dataDate,n2,"tree.nwk",sep="")
+```
+
+```{r, include=FALSE, echo=FALSE}
+# read metadata
+# only country and adm1
+metadata <- read.csv(paste(metaPath,metaName,sep=""))
+nseqs <- length(metadata[,1])
+```
+
+```{r, include=FALSE, echo=FALSE}
+# configure the metadata information
+
+# basic continents
+region<- unGeoScheme(metadata$country)
+continent <- region
+# re-configure so is like the GISAID
+continent[grep("Oceania", continent)] <- "Oceania"
+continent[grep("Asia", continent)]    <- "Asia"
+continent[grep("Europe", continent)]  <- "Europe"
+continent[grep("Africa", continent)]  <- "Africa"
+continent[grep("NorthernAmerica", continent)] <- "North America"
+continent[grep("SouthernAmerica", continent)] <- "South America"
+continent[grep("CentralAmerica", continent)] <- "Central America"
+ccols <- colourize_BEAST_cols(continent)
+cont_tbl <- table(continent)
+ctxt  <- paste(rownames(cont_tbl)," (",cont_tbl,")",sep="")
+
+# country_state and UK
+country       <- metadata$country
+country_state <- paste(metadata$adm1)
+u_uk_states   <- c("England","Wales","Scotland","Northern Ireland")
+country_state[grep("UK-ENG", country_state)] <- "England"
+country_state[grep("UK-SCT", country_state)] <- "Scotland"
+country_state[grep("UK-WLS", country_state)] <- "Wales"
+country_state[grep("UK-NIR", country_state)] <- "Northern Ireland"
+country_state[which(country_state=="")] <- "-"
+country_state <- factor(country_state, levels=c(u_uk_states,"-"))
+uk_cols     <- colourize_BEAST_cols(country_state, ustates=u_uk_states, 
+                                    ucols=c(get_BEAST_cols(4,bright=0.8, sat=0.7),"grey90"))
+uk_inds     <- which(country=="UK")
+uk_tbl <- table(country_state[uk_inds])
+uk_txt <- paste(rownames(uk_tbl)," (",uk_tbl,")",sep="")
+uk_txt <- uk_txt[1:4]
+
+# scotland
+scot_inds <- which(country_state=="Scotland")
+# wales
+wales_inds <- which(country_state=="Wales")
+
+# decimal dates
+# correction
+metadata$sample_date[which(metadata$sample_date=="2022-04-05")] <- "2020-04-05"
+decDates <- apply(as.matrix(metadata$sample_date), 1, calcDecimalDate_fromTxt, sep="-", dayFirst=FALSE)
+
+maxDate   <- max(decDates)
+max_ii    <- which.max(decDates)
+min_ii    <- which.min(decDates)
+min_date  <- as.integer(strsplit(paste(metadata$sample_date[min_ii]),"-")[[1]])
+if (min(decDates) > 2020) {
+  min_date<- c(2020,1,1)
+}
+  
+max_date  <- as.integer(strsplit(paste(metadata$sample_date[max_ii]),"-")[[1]])
+dates_res <- get_udates(min_date=min_date,max_date=max_date)
+```
+
+```{r, include=FALSE, echo=FALSE}
+# define custom plot functions
+do_continent_pie <- function(cont_tbl=cont_tbl, ccols=ccols, 
+                             ctxt=ctxt, dataDate=dataDate, show.legend=TRUE) {
+  op <- par(mar=c(0,0,2,0))
+  pie(cont_tbl, col=ccols$ucols)
+  title(paste("Number of sequences",dataDate))
+  if (show.legend) {
+    if (length(ctxt)<10) {
+      legend("topleft",ctxt,pch=22,bty="n",pt.bg=ccols$ucols)
+    } else {
+      nn <- length(ctxt)
+      nn2<- ceiling(nn/2)
+      legend("topleft",ctxt[1:nn2],pch=22,bty="n",pt.bg=ccols$ucols[1:nn2])
+      legend("topright",ctxt[(nn2+1):nn],pch=22,bty="n",pt.bg=ccols$ucols[(nn2+1):nn])
+    }
+  }
+  par(op)
+}
+
+do_continent_bars <- function(continent, ctxt=ctxt, ccols=ccols, dates=dates, 
+                              dataDate=dataDate, dates_res=dates_res) {
+  udate    <- dates_res$udate
+  seldates <- dates_res$seldates
+  seldates2<- dates_res$seldates2
+  xlabs    <- dates_res$xlabs
+
+  barplot(  table( continent, factor(dates,levels=udate ) ), 
+            names=xlabs, col=ccols$ucols, xlab="Sample date", ylab="Number of sequences" )
+  legend("topleft",ctxt,pch=22,bty="n",pt.bg=ccols$ucols)
+  title(paste("Number of sequences",dataDate))
+}
+
+do_uk_bars <- function(country_state, uk_inds=uk_inds, uk_txt=uk_txt, uk_cols=uk_cols, dates=dates, 
+                              dataDate=dataDate, dates_res=dates_res, show.legend=TRUE) {
+  udate    <- dates_res$udate
+  seldates <- dates_res$seldates
+  seldates2<- dates_res$seldates2
+  xlabs    <- dates_res$xlabs
+
+  barplot(  table( country_state[uk_inds], factor(dates[uk_inds],levels=udate ) ), 
+            names=xlabs, col=uk_cols$ucols, xlab="Sample date", ylab="Number of sequences" )
+  
+  if (show.legend) {
+    if (length(uk_txt)<10) {
+      legend("topleft",uk_txt,pch=22,bty="n",pt.bg=uk_cols$ucols)
+    } else {
+      nn <- length(uk_txt)
+      nn2<- ceiling(nn/2)
+      legend("topleft",uk_txt[1:nn2],pch=22,bty="n",pt.bg=uk_cols$ucols)
+      legend("topright",uk_txt[(nn2+1):nn],pch=22,bty="n",pt.bg=uk_cols$ucols)
+    }
+  }
+  title(paste("Number of sequences",dataDate))
+}
+```
+
+```{r, echo=FALSE, include=FALSE}
+# read global newick tree
+tr <- read.tree( paste(metaPath,treeName,sep=""))
+```
+
+# Project Details
+### Title: Tracking the rise and fall of Scottish SARS-CoV-2 / COVID-19 using virus sequences
+### CSO project number: COV/EDI/20/11
+
+# Background
+
+Virus sequence data can help indicate the transmission routes between different places in the world.  SARS-CoV-2 viruses from COVID-19 cases are being sequenced in many countries around the world, and since virus genomes accumulate mutations over time, and even over the time scale of a few weeks a few mutations would normally appear.  This implies that very similar sequences detected from different places probably had a common source.
+
+
+Sequences from around the world are deposited in the globally accessible database GISAID ( https://www.gisaid.org ) to aid the international effort in combating the virus.  The COVID-19 Genomics UK Consortium (“COG” https://www.cogconsortium.uk ) has been sequencing UK cases, and has generated an amazing data set of >20,000 sequences from England, Scotland, Wales and Northern Ireland which has also been made available to the international community via GISAID.  The UK sequences represent over >50% of the sequences on the database.
+
+# Sequence Data Report
+This report summarises the public data set of `r dataDate` made available on Mircoreact (https://microreact.org/project/cogconsortium/) which is part of the MRC CLIMB server, and has data collected and processed via the COVID-19 Genomics UK Consortium (COG) ( https://www.cogconsortium.uk )
+
+The data set comprises a report on whole genome sequences from the England, Scotland, Wales and Northern Ireland sequenced by several centres in the consortium; and GISAID ( https://www.gisaid.org ) sequences from other countries included as background information.  The UK sequences are also being submitted to the GISAID database as part of the sequencing pipeline (but they are not included twice in this file).
+
+# Global Sequences
+There are `r nseqs` sequences in the `r dataDate` data set.
+
+```{r, continent_pie, echo=FALSE}
+do_continent_pie(cont_tbl=cont_tbl, ccols=ccols, ctxt=ctxt, dataDate=dataDate)
+```
+
+```{r, continent_bars, echo=FALSE}
+do_continent_bars(continent=continent, ctxt=ctxt, ccols=ccols, 
+                  dates=metadata$sample_date, dataDate=dataDate,
+                  dates_res=dates_res)
+```
+
+# UK and Scottish sequences
+There are `r length(uk_inds)` UK sequences in the `r dataDate` data set, representing `r format(100*length(uk_inds)/nseqs, digits=2)`% of the total global sequences.
+
+There are `r length(scot_inds)` Scottish sequences in the `r dataDate` data set, representing `r format(100*length(scot_inds)/length(uk_inds), digits=2)`% of the UK sequences from COG consortium, and `r format(100*length(scot_inds)/nseqs, digits=2)`% of the total global sequences.
+
+There are `r length(wales_inds)` Scottish sequences in the `r dataDate` data set, representing `r format(100*length(wales_inds)/length(uk_inds), digits=2)`% of the UK sequences from COG consortium, and `r format(100*length(wales_inds)/nseqs, digits=2)`% of the total global sequences.
+
+```{r, uk_bars, echo=FALSE}
+do_uk_bars(country_state, uk_inds=uk_inds, uk_txt=uk_txt,
+           uk_cols=uk_cols, dates=metadata$sample_date, 
+           dataDate=dataDate, dates_res=dates_res)
+```
+
+```{r, uk_pie, echo=FALSE}
+do_continent_pie(cont_tbl=uk_tbl, ccols=uk_cols, ctxt=uk_txt, dataDate=dataDate)
+```
+
+# Lineages
+
+The COG consortium has generated a global phylogenetic tree of all the sequences, and to assist analysis of the >30,000 sequences, they are classified into lineages containing common mutations ( https://pangolin.cog-uk.io and https://doi.org/10.1101/2020.04.17.046086  ).  It is important to note that there is no significant difference between the properties of these lineages in terms of transmissibility and virulence at the present time.  The global tree and lineage details are available from the Microreact website which is maintained by The Centre for Genomic Pathogen Surveillance to enable weekly evaluation of the lineages circulating in the UK. ( Microreact project at https://microreact.org/project/cogconsortium/ )
+
+```{r, echo=FALSE}
+  l2 <- paste(metadata$lineage)
+  l2[which(l2=="")] <- "X"
+  l2[grep("A.1",l2)] <- "A.1"
+  l2[grep("B.1",l2)] <- "B.1"
+  l2[grep("B.2",l2)] <- "B.2"
+  l2tbl <- table(tr$l2)
+  l2cols<- colourize_BEAST_cols(l2)
+  l2txt <- paste( names(l2tbl)," (",l2tbl,")",sep="" )
+```
+
+```{r, continent_lineages, echo=FALSE}
+  op <- par(mfrow=c(2,4), mar=c(0,0,0,0))
+  for (j in 1:length(ccols$ustates)) {
+    cinds <- which(continent==ccols$ustates[j])
+    pie(table(factor(l2[cinds], levels=l2cols$ustates)),col=l2cols$ucols)
+    text(0,-1,ccols$ustates[j],cex=2)
+  }
+  cinds <- which(country=="UK")
+  pie(table(factor(l2[cinds], levels=l2cols$ustates)),col=l2cols$ucols)
+  text(0,-1,"UK",cex=2)
+  par(op)
+```
+```{r, wales_scotland_lineages, echo=FALSE}
+  #op <- par(mfrow=c(1,4), mar=c(0,0,0,0))
+  #for (j in 1:length(uk_cols$ustates)) {
+  #  cinds <- which(country_state==uk_cols$ustates[j])
+  #  pie(table(factor(l2[cinds], levels=l2cols$ustates)),col=l2cols$ucols)
+  #  text(0,-1,uk_cols$ustates[j])
+  #}
+  #par(op)
+  op <- par(mfrow=c(1,2), mar=c(0,0,0,0))
+  for (j in 2:3) {
+    cinds <- which(country_state==uk_cols$ustates[j])
+    pie(table(factor(l2[cinds], levels=l2cols$ustates)),col=l2cols$ucols)
+    text(0,-1,uk_cols$ustates[j],cex=2)
+  }
+  par(op)
+```
+
+
+# Scotland and Wales Compared
+
+Time line for Scotland and Wales sequences only
+```{r, wales_scotland_bars, echo=FALSE}
+scot_wales_country <- c(paste(country_state[wales_inds]),paste(country_state[scot_inds]))
+usw   <- c("Wales","Scotland")
+swtbl <- table(factor(paste(scot_wales_country), levels=usw))
+swtxt <- paste(rownames(swtbl)," (",swtbl,")",sep="")
+swcols<- colourize_BEAST_cols(scot_wales_country, sat=0.5, bright=0.9, ustates=usw)
+do_continent_bars(continent=scot_wales_country, ctxt=swtxt, ccols=swcols, 
+                  dates=metadata$sample_date[c(wales_inds,scot_inds)], dataDate=dataDate,
+                  dates_res=dates_res)
+```
+
+Tree with Scotland and Wales sequences marked
+```{r, echo=FALSE}
+tinds        <- match(tr$tip.label, metadata$id)
+#all( tr$tip.label == metadata$id[tinds])
+tr           <- ladderize(tr)
+tr$continent <- continent[tinds]
+tr$country   <- metadata$country[tinds]
+tr$country_state <- country_state[tinds]
+tr$lineage  <- metadata$lineage[tinds]
+```
+```{r, wales_scotland_tree, echo=FALSE, fig.height=10}
+op <- par(mfrow=c(1,2))
+
+ppch <- array(NA,length(tr$tip.label))
+#ppch[which(tr$country_state=="Scotland")] <- 21
+ppch[which(tr$country_state=="Wales")] <- 23
+tipcols <- array(NA,length(tr$tip.label))
+#tipcols[which(tr$country_state=="Scotland")] <- swcols$ucols[2]
+tipcols[which(tr$country_state=="Wales")] <- swcols$ucols[1]
+
+plot(tr, show.tip=FALSE, edge.col="grey70")
+tiplabels(pch=ppch,bg=tipcols, cex=1.5)
+add.scale.bar(2e-4,0,1e-4)
+title("Tree with Wales")
+
+ppch <- array(NA,length(tr$tip.label))
+ppch[which(tr$country_state=="Scotland")] <- 21
+#ppch[which(tr$country_state=="Wales")] <- 23
+tipcols <- array(NA,length(tr$tip.label))
+tipcols[which(tr$country_state=="Scotland")] <- swcols$ucols[2]
+#tipcols[which(tr$country_state=="Wales")] <- swcols$ucols[1]
+
+plot(tr, show.tip=FALSE, edge.col="grey70")
+tiplabels(pch=ppch,bg=tipcols, cex=1.5)
+add.scale.bar(2e-4,0,1e-4)
+title("Tree with Scotland")
+
+par(op)
+
+```
+
+# Imports and Exports for Scotland and Wales
+
+## Initial estimate of imports and exports
+
+Using a discrete traits model on the global tree, it is possible to estimate the numbers of imports and exports to Scotland and Wales.  Here the simplest equal rates discrete trait model is used (most similar to parsimony).  Estimates are dependent upon the number of sequences in each category, and the accuracy of the tree.  The table shows the counts of transitions on the tree to or from Scotland or Wales to all places, and the total transitions to or from Scotland or Wales excluding the Scotland-Scotland and Wales-Wales transitions.
+
+```{r, echo=FALSE}
+  etol <- 1e-12
+  utipstate<- c(ccols$ustates, u_uk_states)
+  sub_tree <- tr
+  sub_tree <- multi2di(sub_tree)
+  einds    <- which(sub_tree$edge.length <=  etol)
+  sub_tree$edge.length[einds] <- etol
+  sub_tree <- multi2di(sub_tree)
+    
+  tipstate <- paste(sub_tree$continent)
+  tipstate[which(sub_tree$country=="UK")]    <- paste(sub_tree$country_state[which(sub_tree$country=="UK")])
+  ace_ER <- ace(tipstate, sub_tree, type="discrete", model="ER")
+  sub_tree$tipstate <- tipstate
+  anc_state <- colnames(ace_ER$lik.anc)[apply(ace_ER$lik.anc, 1, which.max)]
+  sub_tree$state  <- factor(c(tipstate, anc_state),levels=utipstate)
+  sub_tree$ace_ER <- ace_ER
+```
+```{r, echo=FALSE}
+  focus_states <- usw #c("Scotland","Wales")
+  import_tbl_sw <- matrix(-1, 2, 1+length(utipstate))
+  export_tbl_sw <- matrix(-1, 2, 1+length(utipstate))
+  colnames(import_tbl_sw) <- c("Total",utipstate)
+  colnames(export_tbl_sw) <- c("Total",utipstate)
+  rownames(import_tbl_sw) <- focus_states
+  rownames(export_tbl_sw) <- focus_states
+  
+  for (j in 1:length(focus_states)) {
+      from_inds <- which(sub_tree$state[sub_tree$edge[,1]]==focus_states[j])
+      if (length(from_inds)>0) {
+        exports_from_focus <- table( sub_tree$state[sub_tree$edge[from_inds,2]]  )
+      } else {
+        exports_from_focus <- array(0, length(utipstate))
+      }
+      
+      to_inds   <- which(sub_tree$state[sub_tree$edge[,2]]==focus_states[j])
+      if (length(to_inds)>0) {
+        imports_to_focus <- table( sub_tree$state[sub_tree$edge[to_inds,1]]  )
+      } else {
+        imports_to_focus <- array(0, length(utipstate))
+      }
+      
+      total_non_self_exports <- sum(exports_from_focus[which(utipstate!=focus_states[j])])
+      total_non_self_imports <- sum(imports_to_focus[which(utipstate!=focus_states[j])])
+      
+      export_tbl_sw[j,] <- c(total_non_self_exports,exports_from_focus)
+      import_tbl_sw[j,] <- c(total_non_self_imports,imports_to_focus)
+  }
+```
+
+```{r, echo=FALSE}
+kable(import_tbl_sw, caption="Imports to Scotland and Wales")
+```
+
+```{r, echo=FALSE}
+kable(export_tbl_sw, caption="Exports from Scotland and Wales")
+```
+
+```{r, wales_scotland_import_export, echo=FALSE, fig.height=10}
+iecols <- c("grey50",ccols$ucols,uk_cols$ucols)
+hh <- FALSE
+legpos1 <- "bottomright"
+legpos2 <- "topright"
+for (j in 1:length(import_tbl_sw[,1])) {
+  inc_inds <- which(colnames(import_tbl_sw)!=rownames(import_tbl_sw)[j])
+  maxval   <- max(c(import_tbl_sw[j,inc_inds], export_tbl_sw[j,inc_inds]))
+  op <- par(mfrow=c(2,1))
+  
+  barplot(import_tbl_sw[j,inc_inds],col=iecols[inc_inds], 
+          ylim=c(0,maxval), horiz=hh)
+  title(paste("Imports to",rownames(import_tbl_sw)[j]))
+  legend(legpos2,paste(colnames(import_tbl_sw)[inc_inds]," (",import_tbl_sw[j,inc_inds],")"),
+         pch=22,
+         bty="n",pt.bg=iecols[inc_inds])
+  
+  barplot(-export_tbl_sw[j,inc_inds],col=iecols[inc_inds], 
+          ylim=c(-maxval,0), horiz=hh)
+  title(paste("Exports from",rownames(export_tbl_sw)[j]))
+  legend(legpos1,paste(colnames(export_tbl_sw)[inc_inds]," (",export_tbl_sw[j,inc_inds],")"),
+         pch=22,
+         bty="n",pt.bg=iecols[inc_inds])
+  
+  par(op)
+}
+```
+
+## Improvements to calculations (not done yet)
+
+The import and export counts can be improved by:
+
+- Improving the tree and subtrees by using time-scaled trees (e.g. treedater, or IQtree)
+- Carefully considering exactly what sequences are being used togther and balancing the numbers of sequences per state and time period analysed
+- Using an improved model; the equal rates model is the simplest, but SYM (symmetric) and ASYM (asymmetric, also known as ARD all-rates-different) are possible
+- Averaging over a collection of trees (e.g. bootstrapped trees)
+- Using BEAST to generate the time-scaled trees and to perform the discrete traits analysis (fully bayesian in trees and traits)
+- With time scaled trees, calculate the number of imports and exports within a time period, for example per month or pre-post lockdown (possible because the branches now have times at the ancestral and child nodes)
+
+## Imports and exports per lineage
+
+Sub trees with Scotland and Wales per named lineage.  Sub trees are extracted by finding the most recent common ancestor of the Scotland and Wales sequences per lineage, and then extracting the clade in the tree from that ancestor.  Consequently, the sub tree can contain sequences from many places.  Sub trees with sequences only classified to the lowest levels e.g. A, B will therefore be very large since these are basal clades.
+
+```{r, lineage_trees, echo=FALSE}
+ulin <- sort( unique( metadata$lineage[c(wales_inds,scot_inds)] ) )
+ulin <- setdiff(ulin,c("A","B"))
+sts       <- vector("list",length(ulin))
+sub_stats <- matrix(0, length(ulin), 6)
+rownames(sub_stats) <- ulin
+colnames(sub_stats) <- c("Num_Seqs","Num_Wales","Num_Scotland","Num_Lin_Seqs","Num_Lin_Wales","Num_Lin_Scotland")
+op <- par(mfrow=c(1,2))
+for (i in 1:length(ulin)) {
+  tips<- which(tr$lineage==ulin[i] & (tr$country_state=="Wales" | tr$country_state=="Scotland"))
+  if (length(tips)>1) {
+    anc <- getMRCA(tr,tips)
+  } else {
+    anc <- tr$edge[which(tr$edge[,2]==tips),1]
+  }
+  anc      <- tr$edge[which(tr$edge[,2]==anc),1]
+  sub_tree <- extract.clade(tr, anc)
+  sinds <- match(sub_tree$tip.label, metadata$id)
+  sub_tree$country       <- metadata$country[sinds]
+  sub_tree$country_state <- country_state[sinds]
+  sub_tree$continent     <- continent[sinds]
+  sub_tree$lineage       <- metadata$lineage[sinds]
+  sub_tree$tipcols       <- array(NA, length(sub_tree$tip.label))
+  sub_tree$tipcols[which(sub_tree$country_state=="Wales")]    <- swcols$ucols[which(swcols$ustates=="Wales")]
+  sub_tree$tipcols[which(sub_tree$country_state=="Scotland")] <- swcols$ucols[which(swcols$ustates=="Scotland")]
+  sub_tree$tipcols2       <- array(hsv(0,0,0.7,0.5), length(sub_tree$tip.label))
+  sub_tree$tipcols2[which(sub_tree$country_state=="Wales")]    <- "black"
+  sub_tree$tipcols2[which(sub_tree$country_state=="Scotland")] <- "black"
+  sub_tree$ppch          <- array(24, length(sub_tree$tip.label))
+  sub_tree$ppch[which(sub_tree$country_state=="Wales")]          <- 23
+  sub_tree$ppch[which(sub_tree$country_state=="Scotland")] <- 21
+  sub_tree$cex <- array(0.75,length(sub_tree$tip.label))
+  sub_tree$cex[which(sub_tree$lineage==ulin[i])] <- 1.5
+  sub_stats[i,1] <- length(sub_tree$tip.label)
+  sub_stats[i,2] <- length(which(sub_tree$country_state=="Wales"))
+  sub_stats[i,3] <- length(which(sub_tree$country_state=="Scotland"))
+  sub_stats[i,4] <- length(which(sub_tree$lineage==ulin[i]))
+  sub_stats[i,5] <- length(which(sub_tree$country_state=="Wales" & sub_tree$lineage==ulin[i]))
+  sub_stats[i,6] <- length(which(sub_tree$country_state=="Scotland" & sub_tree$lineage==ulin[i]))
+  sts[[i]]       <- sub_tree
+  
+  stxt <- c(paste(ulin[i]," Wales (",length(which(sub_tree$country_state=="Wales" & sub_tree$lineage==ulin[i])),")",sep=""),
+            paste(ulin[i]," Scotland (",length(which(sub_tree$country_state=="Scotland" & sub_tree$lineage==ulin[i])),")",sep=""))
+  
+  if (sub_stats[i,1] < 5000) {
+    plot(sub_tree, show.tip=FALSE, edge.col=hsv(0,0,0.7,0.5))
+    tiplabels(pch=sub_tree$ppch,bg=sub_tree$tipcols, col=sub_tree$tipcols2, cex=sub_tree$cex)
+    add.scale.bar(2e-4,0,1e-4)
+    legend("bottomleft",stxt,pch=c(23,21),pt.bg=swcols$ucols,bty="n")
+    title(paste(ulin[i],"sub tree with Scotland and Wales"))
+  }
+}
+par(op)
+```
+
+Using a discrete traits model on these subtrees, it is possible to estimate the numbers of imports and exports to Scotland and Wales per lineage.  Here the simplest equal rates discrete trait models are used, these are most similar to parsimony, and note possible improvements to these calculatations mentioned above.
+
+Estimates are dependent upon the number of sequences in each category, and the accuracy of the subtree.  Only subtrees with < 5000 sequences have been processed.
+
+```{r, echo=FALSE}
+etol <- 1e-12
+#utipstate <- c(ccols$ustates,"China","Singapore","India","Japan","Italy","Spain",u_uk_states)
+utipstate<- c(ccols$ustates, u_uk_states)
+focus_states <- c("Scotland","Wales")
+import_tbl_1 <- matrix(-1, length(ulin), 1+length(utipstate))
+import_tbl_2 <- matrix(-1, length(ulin), 1+length(utipstate))
+export_tbl_1 <- matrix(-1, length(ulin), 1+length(utipstate))
+export_tbl_2 <- matrix(-1, length(ulin), 1+length(utipstate))
+colnames(import_tbl_1) <- c("Total",utipstate)
+colnames(import_tbl_2) <- c("Total",utipstate)
+colnames(export_tbl_1) <- c("Total",utipstate)
+colnames(export_tbl_2) <- c("Total",utipstate)
+rownames(import_tbl_1) <- ulin
+rownames(import_tbl_2) <- ulin
+rownames(export_tbl_1) <- ulin
+rownames(export_tbl_2) <- ulin
+for (i in 1:length(ulin)) {
+  if ((sub_stats[i,1] <= 4000) & ((sub_stats[i,2]>0) | (sub_stats[i,3]>0))) {
+    sub_tree <- sts[[i]]
+    sub_tree <- multi2di(sub_tree)
+    einds    <- which(sub_tree$edge.length <=  etol)
+    sub_tree$edge.length[einds] <- etol
+    sub_tree <- multi2di(sub_tree)
+    
+    tipstate <- paste(sub_tree$continent)
+    #tipstate[which(sub_tree$country=="India")] <- "India"
+    #tipstate[which(sub_tree$country=="Japan")] <- "Japan"
+    #tipstate[which(sub_tree$country=="China")] <- "China"
+    #tipstate[which(sub_tree$country=="Italy")] <- "Italy"
+    #tipstate[which(sub_tree$country=="Spain")] <- "Spain"
+    #tipstate[which(sub_tree$country=="Singapore")] <- "Singapore"
+    tipstate[which(sub_tree$country=="UK")]    <- paste(sub_tree$country_state[which(sub_tree$country=="UK")])
+    ace_ER <- ace(tipstate, sub_tree, type="discrete", model="ER")
+    sub_tree$tipstate <- tipstate
+    anc_state <- colnames(ace_ER$lik.anc)[apply(ace_ER$lik.anc, 1, which.max)]
+    sub_tree$state  <- factor(c(tipstate, anc_state),levels=utipstate)
+    sub_tree$ace_ER <- ace_ER
+    sts[[i]] <- sub_tree
+    
+    #print(ulin[i])
+    #print( table(sub_tree$state[sub_tree$edge[,1]], sub_tree$state[sub_tree$edge[,2]]) )
+    
+    for (j in 1:length(focus_states)) {
+      from_inds <- which(sub_tree$state[sub_tree$edge[,1]]==focus_states[j])
+      if (length(from_inds)>0) {
+        exports_from_focus <- table( sub_tree$state[sub_tree$edge[from_inds,2]]  )
+      } else {
+        exports_from_focus <- array(0, length(utipstate))
+      }
+      
+      to_inds   <- which(sub_tree$state[sub_tree$edge[,2]]==focus_states[j])
+      if (length(to_inds)>0) {
+        imports_to_focus <- table( sub_tree$state[sub_tree$edge[to_inds,1]]  )
+      } else {
+        imports_to_focus <- array(0, length(utipstate))
+      }
+      
+      if (j==1) {
+        export_tbl_1[i,] <- c(sum(exports_from_focus[which(utipstate!=focus_states[j])]),exports_from_focus)
+        import_tbl_1[i,] <- c(sum(imports_to_focus[which(utipstate!=focus_states[j])]),imports_to_focus)
+      } else {
+        export_tbl_2[i,] <- c(sum(exports_from_focus[which(utipstate!=focus_states[j])]),exports_from_focus)
+        import_tbl_2[i,] <- c(sum(imports_to_focus[which(utipstate!=focus_states[j])]),imports_to_focus)
+      }
+    }
+    
+  }
+}
+```
+
+```{r, echo=FALSE}
+kable(sub_stats, caption="Number of sequences in each subtree (lineage)")
+```
+
+Only sub trees with less than 5000 sequences are processed (for example the subtree of B.1 is very large and encompases most of the sequences, so for the results from this see the global results above).
+
+For the subtrees with less than 5000 sequences, a simple equal rates discrete traits model with n=`r length(utipstate)` states comprising `r utipstate` was used.
+
+```{r, echo=FALSE}
+ex_inds <- which(import_tbl_1[,1]=="-1")
+inc_inds<- which(import_tbl_1[,1]>=0)
+```
+
+```{r, echo=FALSE}
+kable(import_tbl_2[inc_inds,], caption="Imports to Wales per lineage")
+```
+
+```{r, echo=FALSE}
+kable(import_tbl_2[inc_inds,], caption="Exports from Wales per lineage")
+```
+
+```{r, echo=FALSE}
+kable(import_tbl_1[inc_inds,], caption="Imports to Scotland per lineage")
+```
+
+```{r, echo=FALSE}
+kable(export_tbl_1[inc_inds,], caption="Exports from Scotland per lineage")
+```
+

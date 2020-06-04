@@ -1,0 +1,247 @@
+---
+title: "Rise and Fall of Scottish COVID-19: Sequence Data Report"
+author: "Samantha Lycett"
+date: "27/05/2020"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+#library(kableExtra)
+library(tibble)
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.width=12, fig.height=6)
+library(ape)
+```
+
+```{r, include=FALSE, echo=FALSE}
+# load some custom functions
+#Rpath <- "~/Documents//GitLab//RiseFall-Scottish-COVID19//coronavirus_2020_r//"
+Rpath <- ""
+source(paste(Rpath,"getEl.R",sep=""))
+source(paste(Rpath,"calcDecimalDate.R",sep=""))
+source(paste(Rpath,"get_BEAST_cols.R",sep=""))
+source(paste(Rpath,"get_udates.R",sep=""))
+source(paste(Rpath,"birdSpecies_and_continents.R",sep=""))
+```
+
+```{r, include=FALSE, echo=FALSE}
+## THIS CAN BE CHANGED - dataDate is the date of the dataset, and is in the path and file names
+dataDate <- "2020-05-22"
+```
+
+```{r, include=FALSE, echo=FALSE}
+# set up paths
+rootPath <- "~/Documents//data//Coronavirus_2020/COG_downloads//"
+path2    <- "microreact"
+ext      <-"_metadata_private.csv"
+metaPath <- paste(rootPath,dataDate,"//",path2,"//",sep="")
+metaName <- paste("cog_global_",dataDate,ext,sep="")
+treeName <- paste("cog_global_",dataDate,"_tree.newick",sep="")
+```
+
+```{r, include=FALSE, echo=FALSE}
+# read metadata
+metadata <- read.csv(paste(metaPath,metaName,sep=""))
+nseqs <- length(metadata[,1])
+```
+
+```{r, include=FALSE, echo=FALSE}
+# configure the metadata information
+
+# basic continents
+region<- unGeoScheme(metadata$country)
+continent <- region
+# re-configure so is like the GISAID
+continent[grep("Oceania", continent)] <- "Oceania"
+continent[grep("Asia", continent)]    <- "Asia"
+continent[grep("Europe", continent)]  <- "Europe"
+continent[grep("Africa", continent)]  <- "Africa"
+continent[grep("NorthernAmerica", continent)] <- "North America"
+continent[grep("SouthernAmerica", continent)] <- "South America"
+continent[grep("CentralAmerica", continent)] <- "Central America"
+ccols <- colourize_BEAST_cols(continent)
+cont_tbl <- table(continent)
+ctxt  <- paste(rownames(cont_tbl)," (",cont_tbl,")",sep="")
+
+# country_state and UK
+country       <- metadata$country
+country_state <- paste(metadata$adm1)
+u_uk_states   <- c("England","Wales","Scotland","Northern Ireland")
+country_state[grep("UK-ENG", country_state)] <- "England"
+country_state[grep("UK-SCT", country_state)] <- "Scotland"
+country_state[grep("UK-WLS", country_state)] <- "Wales"
+country_state[grep("UK-NIR", country_state)] <- "Northern Ireland"
+country_state[which(country_state=="")] <- "-"
+country_state <- factor(country_state, levels=c(u_uk_states,"-"))
+uk_cols     <- colourize_BEAST_cols(country_state, ustates=u_uk_states, 
+                                    ucols=c(get_BEAST_cols(4,bright=0.8, sat=0.7),"grey90"))
+uk_inds     <- which(country=="UK")
+uk_tbl <- table(country_state[uk_inds])
+uk_txt <- paste(rownames(uk_tbl)," (",uk_tbl,")",sep="")
+uk_txt <- uk_txt[1:4]
+
+# uk_county
+uk_county <- paste(metadata$adm2)
+uk_county[grep("UNKNOWN",uk_county)] <- "UNKNOWN"
+uk_county[which(uk_county=="")] <- "UNKNOWN"
+u_uk_county <- setdiff(sort(unique(uk_county)),"UNKNOWN")
+uk_county <- factor(uk_county, levels=c(u_uk_county,"UNKNOWN"))
+
+# scotland
+scot_inds <- which(country_state=="Scotland")
+u_scot    <- c(setdiff(sort(unique(uk_county[scot_inds])),"UNKNOWN"),"UNKNOWN")
+scot_cols <- colourize_BEAST_cols(uk_county, ustates=u_scot, 
+                                  ucols=c(get_BEAST_cols(length(u_scot)-1,bright=0.8, sat=0.7),"grey90"))
+scot_tbl  <- table(factor(paste(uk_county[scot_inds]), levels=u_scot))
+scot_txt  <- paste(rownames(scot_tbl)," (",scot_tbl,")",sep="")
+
+# decimal dates
+# correction
+metadata$sample_date[which(metadata$sample_date=="2022-04-05")] <- "2020-04-05"
+decDates <- apply(as.matrix(metadata$sample_date), 1, calcDecimalDate_fromTxt, sep="-", dayFirst=FALSE)
+
+maxDate   <- max(decDates)
+max_ii    <- which.max(decDates)
+min_ii    <- which.min(decDates)
+min_date  <- as.integer(strsplit(paste(metadata$sample_date[min_ii]),"-")[[1]])
+if (min(decDates) > 2020) {
+  min_date<- c(2020,1,1)
+}
+  
+max_date  <- as.integer(strsplit(paste(metadata$sample_date[max_ii]),"-")[[1]])
+dates_res <- get_udates(min_date=min_date,max_date=max_date)
+```
+
+```{r, include=FALSE, echo=FALSE}
+# define custom plot functions
+do_continent_pie <- function(cont_tbl=cont_tbl, ccols=ccols, 
+                             ctxt=ctxt, dataDate=dataDate, show.legend=TRUE) {
+  op <- par(mar=c(0,0,2,0))
+  pie(cont_tbl, col=ccols$ucols)
+  title(paste("Number of sequences",dataDate))
+  if (show.legend) {
+    if (length(ctxt)<10) {
+      legend("topleft",ctxt,pch=22,bty="n",pt.bg=ccols$ucols)
+    } else {
+      nn <- length(ctxt)
+      nn2<- ceiling(nn/2)
+      legend("topleft",ctxt[1:nn2],pch=22,bty="n",pt.bg=ccols$ucols[1:nn2])
+      legend("topright",ctxt[(nn2+1):nn],pch=22,bty="n",pt.bg=ccols$ucols[(nn2+1):nn])
+    }
+  }
+  par(op)
+}
+
+do_continent_bars <- function(continent, ctxt=ctxt, ccols=ccols, dates=dates, 
+                              dataDate=dataDate, dates_res=dates_res) {
+  udate    <- dates_res$udate
+  seldates <- dates_res$seldates
+  seldates2<- dates_res$seldates2
+  xlabs    <- dates_res$xlabs
+
+  barplot(  table( continent, factor(dates,levels=udate ) ), 
+            names=xlabs, col=ccols$ucols, xlab="Sample date", ylab="Number of sequences" )
+  legend("topleft",ctxt,pch=22,bty="n",pt.bg=ccols$ucols)
+  title(paste("Number of sequences",dataDate))
+}
+
+do_uk_bars <- function(country_state, uk_inds=uk_inds, uk_txt=uk_txt, uk_cols=uk_cols, dates=dates, 
+                              dataDate=dataDate, dates_res=dates_res, show.legend=TRUE) {
+  udate    <- dates_res$udate
+  seldates <- dates_res$seldates
+  seldates2<- dates_res$seldates2
+  xlabs    <- dates_res$xlabs
+
+  barplot(  table( country_state[uk_inds], factor(dates[uk_inds],levels=udate ) ), 
+            names=xlabs, col=uk_cols$ucols, xlab="Sample date", ylab="Number of sequences" )
+  
+  if (show.legend) {
+    if (length(uk_txt)<10) {
+      legend("topleft",uk_txt,pch=22,bty="n",pt.bg=uk_cols$ucols)
+    } else {
+      nn <- length(uk_txt)
+      nn2<- ceiling(nn/2)
+      legend("topleft",uk_txt[1:nn2],pch=22,bty="n",pt.bg=uk_cols$ucols)
+      legend("topright",uk_txt[(nn2+1):nn],pch=22,bty="n",pt.bg=uk_cols$ucols)
+    }
+  }
+  title(paste("Number of sequences",dataDate))
+}
+```
+
+```{r, echo=FALSE, include=FALSE}
+# read global newick tree
+tr <- read.tree( paste(metaPath,treeName,sep=""))
+```
+
+
+# Project Details
+### Title: Tracking the rise and fall of Scottish SARS-CoV-2 / COVID-19 using virus sequences
+### CSO project number: COV/EDI/20/11
+
+# Sequence Data Report
+This report summarises the data set of `r dataDate` made available on the MRC CLIMB server via the COVID-19 Genomics UK Consortium (COG) ( https://www.cogconsortium.uk )
+
+The data set comprises whole genome sequences from the England, Scotland, Wales and Northern Ireland sequenced by several centres in the consortium; and GISAID ( https://www.gisaid.org ) sequences from other countries included as background information.  The UK sequences are also being submitted to the GISAID database as part of the sequencing pipeline (but they are not included twice in this file).
+
+# Global Sequences
+There are `r nseqs` sequences in the `r dataDate` data set.
+
+```{r, echo=FALSE}
+do_continent_pie(cont_tbl=cont_tbl, ccols=ccols, ctxt=ctxt, dataDate=dataDate)
+```
+
+```{r, echo=FALSE}
+do_continent_bars(continent=continent, ctxt=ctxt, ccols=ccols, 
+                  dates=metadata$sample_date, dataDate=dataDate,
+                  dates_res=dates_res)
+```
+
+# UK Sequences
+There are `r length(uk_inds)` UK sequences in the `r dataDate` data set, representing `r format(100*length(uk_inds)/nseqs, digits=2)`% of the total global sequences.
+
+```{r, echo=FALSE}
+do_uk_bars(country_state, uk_inds=uk_inds, uk_txt=uk_txt,
+           uk_cols=uk_cols, dates=metadata$sample_date, 
+           dataDate=dataDate, dates_res=dates_res)
+```
+
+\newpage
+
+```{r, echo=FALSE}
+kable(table(uk_county[uk_inds],factor(country_state[uk_inds],levels=u_uk_states)), 
+      caption="UK Sequences by Region" ) #%>% kable_styling(bootstrap_options = "striped")
+```
+
+\newpage
+
+# Scottish Sequences
+There are `r length(scot_inds)` Scottish sequences in the `r dataDate` data set, representing `r format(100*length(scot_inds)/length(uk_inds), digits=2)`% of the UK sequences from COG consortium.
+
+```{r, echo=FALSE}
+do_continent_pie(cont_tbl=scot_tbl, ccols=scot_cols, ctxt=scot_txt, dataDate=dataDate)
+```
+
+```{r, echo=FALSE}
+do_uk_bars(uk_county, uk_inds=scot_inds, uk_txt=scot_txt,
+           uk_cols=scot_cols, dates=metadata$sample_date, 
+           dataDate=dataDate, dates_res=dates_res, show.legend=FALSE)
+```
+
+\newpage
+
+```{r, echo=FALSE}
+kable( table(  factor(metadata$adm2[scot_inds], levels=u_scot),metadata$epi_week[scot_inds]), caption="Scottish sequences by epi-week"  ) #%>% kable_styling(bootstrap_options = "striped")
+```
+
+\newpage
+
+```{r, echo=FALSE}
+kable( table(  factor(metadata$adm2[scot_inds], levels=u_scot),paste(metadata$lineage[scot_inds])), caption="Scottish sequences by lineage", font_size=8  ) #%>% kable_styling(bootstrap_options = "striped", font_size = 8)
+```
+
+
